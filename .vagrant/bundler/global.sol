@@ -1,0 +1,1 @@
+{"dependencies":[["vagrant-windows-sysprep",["= 0.0.10"]]],"checksum":"1419fed4f7a44263a4a56c0fbf0553a787e5775572402217c3129992973ce803","vagrant_version":"2.4.3"}

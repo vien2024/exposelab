@@ -7,8 +7,8 @@ Vagrant.configure("2") do |cfg|
     config.vm.network "private_network", ip:  "10.10.10.3" 
     config.winrm.transport = :plaintext
     config.winrm.basic_auth_only = true
-    config.winrm.retry_limit = 30
-    config.winrm.delay = 10
+    config.winrm.retry_limit = 40
+    config.winrm.delay = 60
 
 
     config.vm.provider "virtualbox" do |v, override|
@@ -39,11 +39,11 @@ Vagrant.configure("2") do |cfg|
   cfg.vm.define "workstation2" do |config| 
     config.vm.box = "rgl/windows-10-1809-enterprise-amd64"
     config.vm.network "private_network", ip:  "10.10.10.102" 
-    config.vm.boot_timeout = 1800
+    config.vm.boot_timeout = 2000
     config.winrm.transport = :plaintext
     config.winrm.basic_auth_only = true
-    config.winrm.retry_limit = 30
-    config.winrm.delay = 10
+    config.winrm.retry_limit = 40
+    config.winrm.delay = 60
 
     config.vm.provider "virtualbox" do |v, override|
       v.name = "WS02" 
@@ -60,55 +60,82 @@ Vagrant.configure("2") do |cfg|
     config.vm.provision "shell", reboot: true
     config.vm.provision "shell", path: "automation_scripts/Add-Aduser-to-localgroup.ps1", privileged: true, args: "-adduser eliot -group_add Administrators -domain 'evilcorp.local'"
     config.vm.provision "shell", path: "automation_scripts/Add-LocalUser.ps1", privileged: true, args: "-adduser tryell -password WinClient123 -group_add Administrators"
+    config.vm.provision "shell", path: "automation_scripts/get-net.ps1", privileged: true
     config.vm.provision "shell", path: "automation_scripts/choco-get-apps.ps1", privileged: true, args: "vlc python3" # choco Script with Addidional Argutmet
     config.vm.provision "shell", inline: "Write-Host -ForegroundColor Green [+] Workstation-02 Box Creation Over!"
 
   end
 # The workstation 1
-  cfg.vm.define "workstation1" do |config| 
-      config.vm.box = "rgl/windows-10-1809-enterprise-amd64"
-      config.vm.network "private_network", ip:  "10.10.10.101"  
-      config.vm.boot_timeout = 1800
-      config.winrm.transport = :plaintext
-      config.winrm.basic_auth_only = true
-      config.winrm.retry_limit = 30
-      config.winrm.delay = 10
+  cfg.vm.define "workstation1" do |config|
+    config.vm.box = "rgl/windows-10-1809-enterprise-amd64"
+    config.vm.network "private_network", ip:  "10.10.10.101"
+    config.vm.boot_timeout = 2000
 
-      config.vm.provider "virtualbox" do |v, override|
-        v.name = "WS01" 
-        v.cpus = 2       
-        v.memory = 1048 
-        v.customize ["modifyvm", :id, "--vram",128] 
-      end
+    # Ensure WinRM uses the correct IP and ports - particularly important when forwarding
+    config.winrm.transport = :plaintext
+    config.winrm.basic_auth_only = true
+    config.winrm.retry_limit = 100
+    config.winrm.delay = 150
 
-      config.vm.provision "shell", inline: "echo -----------sysprep-things-----------------"
-      config.vm.provision "shell", inline: <<-EOS
-      $windowsCurrentVersion = Get-ItemProperty 'HKLM:/SOFTWARE/Microsoft/Windows NT/CurrentVersion'
-      Write-Output "Windows name: $($windowsCurrentVersion.ProductName) $($windowsCurrentVersion.ReleaseId)"
-      Write-Output "Windows version: $($windowsCurrentVersion.CurrentMajorVersionNumber).$($windowsCurrentVersion.CurrentMinorVersionNumber).$($windowsCurrentVersion.CurrentBuildNumber).$($windowsCurrentVersion.UBR)"
-      Write-Output "Windows BuildLabEx version: $($windowsCurrentVersion.BuildLabEx)"
-      EOS
-      config.vm.provision "shell", inline: "Write-Output \"%COMPUTERNAME% before sysprep: $env:COMPUTERNAME\""
-      config.vm.provision "shell", inline: "Get-WmiObject win32_useraccount | Select domain,name,sid"
-      config.vm.provision "windows-sysprep"
-      config.vm.provision "shell", inline: "Write-Output \"%COMPUTERNAME% after sysprep: $env:COMPUTERNAME\""
-      config.vm.provision "shell", inline: "Get-WmiObject win32_useraccount | Select domain,name,sid"
-      config.vm.provision "shell", inline: "echo -------------------Sysprep-Ends----------------------"
-
-
-      config.vm.provision "shell", path: "automation_scripts/Change-Hostname.ps1", privileged: true, args: "-password vagrant -user vagrant -hostname WS01"
-      config.vm.provision "shell", reboot: true
-      config.vm.provision "shell", inline: "foreach ($c in Get-NetAdapter) { write-host 'Setting DNS for' $c.interfaceName ; Set-DnsClientServerAddress -InterfaceIndex $c.interfaceindex -ServerAddresses ('10.10.10.3', '10.10.10.3') }"
-      config.vm.provision "shell", inline: "Write-Host -ForegroundColor Green Turn of Firewall ; Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False" , privileged: true
-      config.vm.provision "shell", path: "automation_scripts/join-domain.ps1", privileged: true, args: "-Password Password123 -user Administrator -domain evilcorp.local" 
-      config.vm.provision "shell", reboot: true
-      config.vm.provision "shell", path: "automation_scripts/Add-LocalUser.ps1", privileged: true, args: "-adduser darlene -password WinClient321 -group_add Administrators"
-      config.vm.provision "shell", reboot: true
-      config.vm.provision "shell", path: "automation_scripts/Add-Aduser-to-localgroup.ps1", privileged: true, args: "-adduser eliot -group_add Administrators -domain 'evilcorp.local'"
-      config.vm.provision "shell", path: "automation_scripts/choco-get-apps.ps1", privileged: true, args: "netcat"
-      config.vm.provision "shell", inline: "Write-Host -ForegroundColor Green [+] Workstation-01 Box Creation Over!"
-
+    config.vm.provider "virtualbox" do |v, override|
+      v.name = "WS01"
+      v.cpus = 2
+      v.memory = 2048 # Increased to 2GB - 1GB is usually not enough
+      v.customize ["modifyvm", :id, "--vram",128]
     end
+
+    # Add a delay to allow the VM to boot fully
+    config.trigger.before "Vagrant::Action::Builtin::WaitForCommunicator", type: :action do |t|
+      t.info = "Sleep to allow VirtualBox guest OS to fully initialize (Windows)"
+      t.run = { inline: "powershell Start-Sleep -Seconds 180" } # Windows Guest
+    end
+
+    # Fix for Windows Firewall (inside the VM) - This must come *before* sysprep
+    config.vm.provision "shell", inline: <<-SHELL, privileged: true
+      netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
+      netsh advfirewall firewall set rule group="Remote Event Log Management" new enable=Yes
+      netsh advfirewall firewall set rule group="Remote Service Management" new enable=Yes
+      netsh advfirewall firewall set rule group="Windows Firewall Remote Management" new enable=Yes
+    SHELL
+
+    config.vm.provision "shell", inline: "echo -----------sysprep-things-----------------"
+
+    config.vm.provision "shell", inline: <<-EOS
+    $windowsCurrentVersion = Get-ItemProperty 'HKLM:/SOFTWARE/Microsoft/Windows NT/CurrentVersion'
+    Write-Output "Windows name: $($windowsCurrentVersion.ProductName) $($windowsCurrentVersion.ReleaseId)"
+    Write-Output "Windows version: $($windowsCurrentVersion.CurrentMajorVersionNumber).$($windowsCurrentVersion.CurrentMinorVersionNumber).$($windowsCurrentVersion.CurrentBuildNumber).$($windowsCurrentVersion.UBR)"
+    Write-Output "Windows BuildLabEx version: $($windowsCurrentVersion.BuildLabEx)"
+    EOS
+
+    config.vm.provision "shell", inline: "Write-Output \"%COMPUTERNAME% before sysprep: $env:COMPUTERNAME\""
+    config.vm.provision "shell", inline: "Get-WmiObject win32_useraccount | Select domain,name,sid"
+
+    config.vm.provision "windows-sysprep"
+
+    config.vm.provision "shell", inline: "Write-Output \"%COMPUTERNAME% after sysprep: $env:COMPUTERNAME\""
+    config.vm.provision "shell", inline: "Get-WmiObject win32_useraccount | Select domain,name,sid"
+
+    config.vm.provision "shell", inline: "echo -------------------Sysprep-Ends----------------------"
+
+    config.vm.provision "shell", path: "automation_scripts/Change-Hostname.ps1", privileged: true, args: "-password vagrant -user vagrant -hostname WS01"
+    config.vm.provision "shell", reboot: true
+
+    config.vm.provision "shell", inline: "foreach ($c in Get-NetAdapter) { write-host 'Setting DNS for' $c.interfaceName ; Set-DnsClientServerAddress -InterfaceIndex $c.interfaceindex -ServerAddresses ('10.10.10.3', '10.10.10.3') }"
+
+    # Disable Firewall (Ensure correct syntax for privileged execution)
+    config.vm.provision "shell", inline: "Write-Host -ForegroundColor Green Turn of Firewall ; Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False", privileged: true
+
+    config.vm.provision "shell", path: "automation_scripts/join-domain.ps1", privileged: true, args: "-Password Password123 -user Administrator -domain evilcorp.local"
+    config.vm.provision "shell", reboot: true
+
+    config.vm.provision "shell", path: "automation_scripts/Add-LocalUser.ps1", privileged: true, args: "-adduser darlene -password WinClient321 -group_add Administrators"
+    config.vm.provision "shell", reboot: true
+
+    config.vm.provision "shell", path: "automation_scripts/Add-Aduser-to-localgroup.ps1", privileged: true, args: "-adduser eliot -group_add Administrators -domain 'evilcorp.local'"
+    config.vm.provision "shell", path: "automation_scripts/get-net.ps1", privileged: true
+    config.vm.provision "shell", path: "automation_scripts/choco-get-apps.ps1", privileged: true, args: "netcat"
+    config.vm.provision "shell", inline: "Write-Host -ForegroundColor Green [+] Workstation-01 Box Creation Over!"
+  end
 
 # The Web server 
   cfg.vm.define "WebServer" do |config| 
@@ -117,8 +144,8 @@ Vagrant.configure("2") do |cfg|
     config.vm.network "private_network", ip:  "172.16.0.10" 
     config.winrm.transport = :plaintext
     config.winrm.basic_auth_only = true
-    config.winrm.retry_limit = 30
-    config.winrm.delay = 10
+    config.winrm.retry_limit = 40
+    config.winrm.delay = 60
 
     config.vm.provider "virtualbox" do |v, override|
       v.name = "WEB01" 
@@ -143,6 +170,8 @@ Vagrant.configure("2") do |cfg|
 # Running Final Commands
 
   cfg.vm.define "rootdomaincontroller" do |config| 
+      config.vm.provision "shell", reboot: true
+      config.vm.provision "shell", path: "automation_scripts/get-net.ps1", privileged: true
       config.vm.provision "shell", inline: "Write-Host -ForegroundColor Cyan [*] Final Commands [*]"
       config.vm.provision "shell", path: "automation_scripts/choco-get-apps.ps1", privileged: true
       config.vm.provision "shell", path: "automation_scripts/Final-touch.ps1", privileged: true
@@ -150,7 +179,6 @@ Vagrant.configure("2") do |cfg|
   end
 
   cfg.vm.define "workstation1" do |config| 
-    
     config.vm.provision "shell", inline: "Write-Host -ForegroundColor Cyan [*] Final Commands [*]"
     config.vm.provision "shell", path: "automation_scripts/Final-touch.ps1", privileged: true
     config.vm.provision "shell", inline: "Write-Host -ForegroundColor Green [+] Workstation-01 Box Cleaning OVER!!"
